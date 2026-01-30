@@ -21,6 +21,7 @@ WHISPER_MODEL = "base"
 OLLAMA_MODEL = "llama3.2"
 SD_MODEL = "stabilityai/sd-turbo"
 SAMPLE_RATE = 16000
+DEFAULT_CHROMECAST = "Living Room TV"  # Set to None to require explicit device
 
 app = FastAPI(title="Voice-to-Image API")
 
@@ -93,15 +94,30 @@ def generate_image(prompt: str) -> Image.Image:
 
 
 def cast_to_chromecast(image: Image.Image, device: str | None = None):
-    """Cast image to Chromecast using catt."""
+    """Cast image to Chromecast using catt (non-blocking)."""
     import subprocess
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        image.save(f.name)
+    import threading
+    import time
+
+    # Save to temp file
+    temp_path = Path(tempfile.mktemp(suffix=".png"))
+    image.save(temp_path)
+
+    def run_catt():
         cmd = ["catt"]
         if device:
             cmd.extend(["-d", device])
-        cmd.extend(["cast", f.name])
-        subprocess.run(cmd, check=True)
+        cmd.extend(["cast", str(temp_path)])
+        # Run catt - it will serve the file until interrupted
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # Wait for cast to initiate, then kill after 10s (image should be loaded by then)
+        time.sleep(10)
+        proc.terminate()
+        # Clean up temp file
+        temp_path.unlink(missing_ok=True)
+
+    thread = threading.Thread(target=run_catt, daemon=True)
+    thread.start()
 
 
 @app.get("/health")
@@ -192,7 +208,8 @@ async def api_pipeline(
 
     # Cast if requested
     if cast:
-        cast_to_chromecast(image, device if device else None)
+        cast_device = device if device else DEFAULT_CHROMECAST
+        cast_to_chromecast(image, cast_device)
 
     # Return image + metadata
     buf = io.BytesIO()

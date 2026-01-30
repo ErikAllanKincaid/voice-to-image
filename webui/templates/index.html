@@ -112,8 +112,8 @@
     <div id="status" class="status">Press and hold the button to record</div>
 
     <div class="options">
-      <label>Chromecast Device (optional)</label>
-      <input type="text" id="device" placeholder="e.g. Living Room TV">
+      <label>Chromecast Device</label>
+      <input type="text" id="device" placeholder="Leave empty for default" value="Living Room TV">
       <div class="checkbox-row">
         <input type="checkbox" id="castEnabled">
         <label for="castEnabled" style="margin:0">Cast to Chromecast</label>
@@ -169,7 +169,16 @@
         status.textContent = 'Listening...';
         status.classList.remove('error');
       } catch (err) {
-        status.textContent = 'Microphone access denied';
+        console.error('Mic error:', err);
+        if (err.name === 'NotAllowedError') {
+          status.textContent = 'Microphone access denied - click lock icon in address bar to allow';
+        } else if (err.name === 'NotFoundError') {
+          status.textContent = 'No microphone found';
+        } else if (err.name === 'NotSupportedError' || err.name === 'SecurityError') {
+          status.textContent = 'Mic requires HTTPS or localhost - use http://localhost:8766';
+        } else {
+          status.textContent = `Mic error: ${err.message}`;
+        }
         status.classList.add('error');
       }
     }
@@ -279,6 +288,14 @@
     recordBtn.addEventListener('mouseleave', stopRecording);
     recordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
     recordBtn.addEventListener('touchend', stopRecording);
+
+    // Check mic permission on load
+    navigator.permissions?.query({ name: 'microphone' }).then(result => {
+      if (result.state === 'denied') {
+        status.textContent = 'Microphone blocked - click lock icon in address bar to allow';
+        status.classList.add('error');
+      }
+    }).catch(() => {});
 
     // Check server health on load
     fetch('/api/health')
