@@ -48,6 +48,25 @@
       animation: pulse 1s infinite;
     }
     .record-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .mode-toggle { display: flex; gap: 1rem; align-items: center; }
+    .continuous-btn {
+      padding: 1rem 1.5rem;
+      border-radius: 8px;
+      border: 2px solid #77dd77;
+      background: #16213e;
+      color: #77dd77;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .continuous-btn:hover { background: #1a2744; }
+    .continuous-btn.running {
+      border-color: #ff6b6b;
+      color: #ff6b6b;
+      animation: pulse 2s infinite;
+    }
+    .continuous-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     @keyframes pulse {
       0%, 100% { transform: scale(1); }
       50% { transform: scale(1.05); }
@@ -108,15 +127,31 @@
   <div class="container">
     <h1>Voice to Image</h1>
 
-    <button id="recordBtn" class="record-btn">Hold to Record</button>
-    <div id="status" class="status">Press and hold the button to record</div>
+    <div class="mode-toggle">
+      <button id="recordBtn" class="record-btn">Hold to Record</button>
+      <button id="continuousBtn" class="continuous-btn">Start Continuous</button>
+    </div>
+    <div id="status" class="status">Press and hold to record, or start continuous mode</div>
 
     <div class="options">
       <label>Chromecast Device</label>
       <input type="text" id="device" placeholder="Leave empty for default" value="Living Room TV">
       <div class="checkbox-row">
-        <input type="checkbox" id="castEnabled">
+        <input type="checkbox" id="castEnabled" checked>
         <label for="castEnabled" style="margin:0">Cast to Chromecast</label>
+      </div>
+      <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #333;">
+        <label>Continuous Mode Settings</label>
+        <div style="display: flex; gap: 1rem; margin-top: 0.5rem;">
+          <div>
+            <label style="font-size: 0.8rem; color: #888;">Record (sec)</label>
+            <input type="number" id="recordDuration" value="5" min="2" max="30" style="width: 70px;">
+          </div>
+          <div>
+            <label style="font-size: 0.8rem; color: #888;">Interval (sec)</label>
+            <input type="number" id="interval" value="60" min="10" max="600" style="width: 70px;">
+          </div>
+        </div>
       </div>
     </div>
 
@@ -133,6 +168,7 @@
 
   <script>
     const recordBtn = document.getElementById('recordBtn');
+    const continuousBtn = document.getElementById('continuousBtn');
     const status = document.getElementById('status');
     const result = document.getElementById('result');
     const resultImg = document.getElementById('resultImg');
@@ -140,10 +176,14 @@
     const promptEl = document.getElementById('prompt');
     const deviceInput = document.getElementById('device');
     const castEnabled = document.getElementById('castEnabled');
+    const recordDurationInput = document.getElementById('recordDuration');
+    const intervalInput = document.getElementById('interval');
 
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
+    let continuousMode = false;
+    let continuousTimeout = null;
 
     async function startRecording() {
       try {
@@ -189,6 +229,79 @@
         isRecording = false;
         recordBtn.classList.remove('recording');
         recordBtn.textContent = 'Hold to Record';
+      }
+    }
+
+    async function timedRecording(durationSec) {
+      return new Promise(async (resolve, reject) => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+          const chunks = [];
+
+          recorder.ondataavailable = (e) => {
+            if (e.data.size > 0) chunks.push(e.data);
+          };
+
+          recorder.onstop = () => {
+            stream.getTracks().forEach(t => t.stop());
+            resolve(chunks);
+          };
+
+          recorder.start(100);
+          setTimeout(() => recorder.stop(), durationSec * 1000);
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }
+
+    async function continuousCycle() {
+      if (!continuousMode) return;
+
+      const duration = parseInt(recordDurationInput.value) || 5;
+      const interval = parseInt(intervalInput.value) || 60;
+
+      status.textContent = `Recording for ${duration}s...`;
+      recordBtn.disabled = true;
+
+      try {
+        const chunks = await timedRecording(duration);
+        if (chunks.length > 0 && continuousMode) {
+          audioChunks = chunks;
+          await processAudio();
+        }
+      } catch (err) {
+        console.error('Continuous recording error:', err);
+        status.textContent = `Error: ${err.message}`;
+        status.classList.add('error');
+      }
+
+      recordBtn.disabled = false;
+
+      if (continuousMode) {
+        status.textContent = `Next recording in ${interval}s...`;
+        continuousTimeout = setTimeout(continuousCycle, interval * 1000);
+      }
+    }
+
+    function toggleContinuousMode() {
+      continuousMode = !continuousMode;
+
+      if (continuousMode) {
+        continuousBtn.textContent = 'Stop Continuous';
+        continuousBtn.classList.add('running');
+        recordBtn.disabled = true;
+        continuousCycle();
+      } else {
+        continuousBtn.textContent = 'Start Continuous';
+        continuousBtn.classList.remove('running');
+        recordBtn.disabled = false;
+        if (continuousTimeout) {
+          clearTimeout(continuousTimeout);
+          continuousTimeout = null;
+        }
+        status.textContent = 'Continuous mode stopped';
       }
     }
 
@@ -288,6 +401,9 @@
     recordBtn.addEventListener('mouseleave', stopRecording);
     recordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
     recordBtn.addEventListener('touchend', stopRecording);
+
+    // Continuous mode toggle
+    continuousBtn.addEventListener('click', toggleContinuousMode);
 
     // Check mic permission on load
     navigator.permissions?.query({ name: 'microphone' }).then(result => {
