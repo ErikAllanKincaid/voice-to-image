@@ -40,6 +40,13 @@ PRESETS = {
         "sd": "stabilityai/sdxl-turbo",
         "sd_steps": 4,
     },
+    # 24GB+ VRAM only
+    "ultra": {
+        "whisper": "medium",
+        "ollama": "llama3.2",
+        "sd": "stabilityai/stable-diffusion-xl-base-1.0",
+        "sd_steps": 30,
+    },
 }
 DEFAULT_PRESET = "standard"
 
