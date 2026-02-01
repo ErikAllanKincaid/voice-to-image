@@ -9,10 +9,7 @@ uv.lock
 
 # Test files
 *.wav
-*_test.png
-*_test_*.png
-test_*.png
-test_*.py
+*.png
 
 # Output
 outputs/
