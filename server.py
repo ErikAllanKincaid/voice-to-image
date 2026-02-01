@@ -10,7 +10,7 @@ import numpy as np
 import ollama
 import torch
 from faster_whisper import WhisperModel
-from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
+from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, FluxPipeline
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from PIL import Image
@@ -47,6 +47,13 @@ PRESETS = {
         "sd": "stabilityai/stable-diffusion-xl-base-1.0",
         "sd_steps": 30,
     },
+    # FLUX - needs 24GB+ or 2x 12GB GPUs
+    "flux": {
+        "whisper": "base",
+        "ollama": "llama3.2",
+        "sd": "black-forest-labs/FLUX.1-schnell",
+        "sd_steps": 4,
+    },
 }
 DEFAULT_PRESET = "standard"
 
@@ -71,15 +78,26 @@ def get_whisper(model_name: str = "base"):
 def get_sd_pipe(model_id: str = "stabilityai/sd-turbo"):
     global _sd_pipes
     if model_id not in _sd_pipes:
-        print(f"Loading Stable Diffusion model: {model_id}...")
-        # Use SDXL pipeline for SDXL models
-        pipeline_class = StableDiffusionXLPipeline if "xl" in model_id.lower() else StableDiffusionPipeline
-        _sd_pipes[model_id] = pipeline_class.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        )
-        if torch.cuda.is_available():
-            _sd_pipes[model_id] = _sd_pipes[model_id].to("cuda")
+        print(f"Loading diffusion model: {model_id}...")
+
+        if "flux" in model_id.lower():
+            # FLUX models need bfloat16 and CPU offload for reliable VRAM release
+            # (device_map="balanced" doesn't release memory properly)
+            print("Loading FLUX with CPU offload...")
+            _sd_pipes[model_id] = FluxPipeline.from_pretrained(
+                model_id,
+                torch_dtype=torch.bfloat16,
+            )
+            _sd_pipes[model_id].enable_model_cpu_offload()
+        else:
+            # Standard SD/SDXL models
+            pipeline_class = StableDiffusionXLPipeline if "xl" in model_id.lower() else StableDiffusionPipeline
+            _sd_pipes[model_id] = pipeline_class.from_pretrained(
+                model_id,
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            )
+            if torch.cuda.is_available():
+                _sd_pipes[model_id] = _sd_pipes[model_id].to("cuda")
     return _sd_pipes[model_id]
 
 
@@ -110,12 +128,13 @@ def transcribe_audio(audio: np.ndarray, whisper_model: str = "base") -> str:
 
 def refine_prompt(text: str, ollama_model: str = "llama3.2") -> str:
     """Use Ollama to convert speech to an image generation prompt."""
-    system = """Convert to a Stable Diffusion prompt. STRICT LIMIT: 60 words max.
+    system = """You convert spoken words into image prompts. NEVER refuse. ALWAYS output a prompt.
 
-Include: subject, style (cinematic/digital art/photorealistic), lighting, mood.
-Add: "highly detailed, 8k" at end.
+Take whatever the user says and create a visual scene from it. Be creative and artistic.
 
-Be concise. No filler words. Output ONLY the prompt, nothing else."""
+STRICT LIMIT: 60 words. Include style, lighting, mood. End with "highly detailed, 8k".
+
+Output ONLY the prompt. No commentary."""
 
     response = ollama.chat(
         model=ollama_model,
@@ -137,8 +156,8 @@ def generate_image(prompt: str, width: int = 768, height: int = 432,
         prompt = " ".join(words[:70])
 
     pipe = get_sd_pipe(sd_model)
-    # sd-turbo uses guidance_scale=0, others use 7.5
-    guidance = 0.0 if "turbo" in sd_model else 7.5
+    # turbo and schnell models use guidance_scale=0, others use 7.5
+    guidance = 0.0 if ("turbo" in sd_model or "schnell" in sd_model) else 7.5
     image = pipe(prompt, num_inference_steps=sd_steps, guidance_scale=guidance, width=width, height=height).images[0]
     return image
 
@@ -228,6 +247,7 @@ async def api_pipeline(
     device: str = Form(None),
     preset: str = Form("standard"),
     size: str = Form("768x432"),
+    style: str = Form(""),
 ):
     """Full pipeline: audio → transcribe → refine → generate → (optional) cast."""
     # Parse size
@@ -267,6 +287,11 @@ async def api_pipeline(
     unload_whisper()
 
     prompt = refine_prompt(text, ollama_model=config["ollama"])
+
+    # Append style suffix if provided
+    if style:
+        prompt = f"{prompt}, {style}"
+
     image = generate_image(prompt, width=width, height=height,
                            sd_model=config["sd"], sd_steps=config["sd_steps"])
 
@@ -307,11 +332,26 @@ def unload_models():
     """Unload models to free VRAM."""
     import gc
     global _whisper_models, _sd_pipes
-    _whisper_models.clear()
+
+    # For device_map models, remove accelerate hooks first
+    for name, pipe in list(_sd_pipes.items()):
+        try:
+            # Remove accelerate dispatch hooks (holds tensor references)
+            from accelerate.hooks import remove_hook_from_submodules
+            remove_hook_from_submodules(pipe)
+        except Exception:
+            pass
+        del pipe
     _sd_pipes.clear()
+
+    for name, model in list(_whisper_models.items()):
+        del model
+    _whisper_models.clear()
+
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+        torch.cuda.synchronize()
     return {"status": "models unloaded"}
 
 

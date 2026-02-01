@@ -143,9 +143,11 @@
       <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #333;">
         <label>Model Quality</label>
         <select id="modelPreset" style="width: 100%; padding: 0.5rem; background: #0f0f23; color: #eee; border: 1px solid #333; border-radius: 4px; margin-top: 0.3rem;">
-          <option value="lite">Lite (fastest, lower quality)</option>
-          <option value="standard" selected>Standard (balanced)</option>
-          <option value="high">High Quality (slower, best results)</option>
+          <option value="lite">Lite (fastest, ~4GB)</option>
+          <option value="standard" selected>Standard (~6GB)</option>
+          <option value="high">High - SDXL-Turbo (~10GB)</option>
+          <option value="ultra">Ultra - SDXL 30 steps (~24GB)</option>
+          <option value="flux">FLUX.1 (~24GB or 2x12GB)</option>
         </select>
       </div>
       <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #333;">
@@ -155,6 +157,39 @@
           <option value="768x432" selected>768x432 (Fast)</option>
           <option value="1024x576">1024x576 (Medium)</option>
           <option value="1280x720">1280x720 (HD)</option>
+        </select>
+      </div>
+      <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #333;">
+        <label>Image Style</label>
+        <select id="imageStyle" style="width: 100%; padding: 0.5rem; background: #0f0f23; color: #eee; border: 1px solid #333; border-radius: 4px; margin-top: 0.3rem;">
+          <option value="random" selected>🎲 Random</option>
+          <option value="">Auto (LLM chooses)</option>
+          <optgroup label="Realistic">
+            <option value="photorealistic photograph">Photorealistic</option>
+            <option value="cinematic film still, dramatic lighting">Cinematic</option>
+            <option value="documentary photography style">Documentary</option>
+          </optgroup>
+          <optgroup label="Artistic">
+            <option value="digital art, vibrant colors">Digital Art</option>
+            <option value="oil painting, textured brushstrokes">Oil Painting</option>
+            <option value="watercolor painting, soft edges">Watercolor</option>
+            <option value="impressionist painting style">Impressionist</option>
+            <option value="pencil sketch, detailed linework">Pencil Sketch</option>
+          </optgroup>
+          <optgroup label="Stylized">
+            <option value="anime style, cel shaded">Anime</option>
+            <option value="comic book art, bold lines">Comic Book</option>
+            <option value="pixel art, retro game style">Pixel Art</option>
+            <option value="3D render, octane render">3D Render</option>
+            <option value="low poly 3D art">Low Poly</option>
+          </optgroup>
+          <optgroup label="Mood/Genre">
+            <option value="fantasy art, magical atmosphere">Fantasy</option>
+            <option value="cyberpunk style, neon lights">Cyberpunk</option>
+            <option value="film noir, black and white, dramatic shadows">Noir</option>
+            <option value="vintage retro style, 1970s aesthetic">Vintage</option>
+            <option value="surrealist art, dreamlike">Surrealist</option>
+          </optgroup>
         </select>
       </div>
       <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #333;">
@@ -195,6 +230,37 @@
     const castEnabled = document.getElementById('castEnabled');
     const modelPresetSelect = document.getElementById('modelPreset');
     const imageSizeSelect = document.getElementById('imageSize');
+    const imageStyleSelect = document.getElementById('imageStyle');
+
+    // Style options for random selection (excludes "random" and "auto" options)
+    const styleOptions = [
+      "photorealistic photograph",
+      "cinematic film still, dramatic lighting",
+      "documentary photography style",
+      "digital art, vibrant colors",
+      "oil painting, textured brushstrokes",
+      "watercolor painting, soft edges",
+      "impressionist painting style",
+      "pencil sketch, detailed linework",
+      "anime style, cel shaded",
+      "comic book art, bold lines",
+      "pixel art, retro game style",
+      "3D render, octane render",
+      "low poly 3D art",
+      "fantasy art, magical atmosphere",
+      "cyberpunk style, neon lights",
+      "film noir, black and white, dramatic shadows",
+      "vintage retro style, 1970s aesthetic",
+      "surrealist art, dreamlike"
+    ];
+
+    function getSelectedStyle() {
+      const val = imageStyleSelect.value;
+      if (val === 'random') {
+        return styleOptions[Math.floor(Math.random() * styleOptions.length)];
+      }
+      return val;
+    }
     const recordDurationInput = document.getElementById('recordDuration');
     const intervalInput = document.getElementById('interval');
 
@@ -338,6 +404,7 @@
       formData.append('device', deviceInput.value);
       formData.append('preset', modelPresetSelect.value);
       formData.append('size', imageSizeSelect.value);
+      formData.append('style', getSelectedStyle());
 
       try {
         const resp = await fetch('/api/pipeline', {

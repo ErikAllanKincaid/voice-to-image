@@ -52,7 +52,11 @@ Add your server URL (e.g., `http://192.168.1.43:8766`) and restart Chrome.
 |--------|---------|-----|-------------|-------|------|
 | Lite | tiny | llama3.2:1b | sd-turbo | 4 | ~4GB |
 | Standard | base | llama3.2 | sd-turbo | 4 | ~6GB |
-| High | medium | llama3.2 | SDXL | 30 | ~12GB |
+| High | base | llama3.2 | sdxl-turbo | 4 | ~10GB |
+| Ultra | medium | llama3.2 | SDXL | 30 | ~24GB |
+| Flux | base | llama3.2 | FLUX.1-schnell | 4 | ~24GB* |
+
+*FLUX automatically uses multi-GPU parallelism if available (2x 12GB works), or CPU offload on single GPU (slower).
 
 ## Image Sizes
 
