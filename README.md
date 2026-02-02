@@ -32,6 +32,33 @@ uv run python server.py
 
 Server runs on port 8765.
 
+## Pre-download Models
+
+Models are lazy-loaded on first request, but you can pre-download to avoid timeouts.
+
+### LLM (Ollama)
+```bash
+ollama pull llama3.2
+ollama pull llama3.2:1b  # for Lite preset
+```
+
+### Diffusion Models (Hugging Face CLI)
+```bash
+uv pip install huggingface_hub
+
+uv run huggingface-cli download stabilityai/sd-turbo        # Lite/Standard, ~5GB
+uv run huggingface-cli download stabilityai/sdxl-turbo      # High preset, ~13GB
+uv run huggingface-cli download stabilityai/stable-diffusion-xl-base-1.0  # Ultra, ~13GB (requires login)
+```
+
+For authenticated models:
+```bash
+uv run huggingface-cli login
+uv run huggingface-cli download stabilityai/stable-diffusion-xl-base-1.0
+```
+
+Models cache to `~/.cache/huggingface/hub/`.
+
 ## Web UI
 
 ```bash
@@ -83,6 +110,49 @@ Requires `catt` (installed via dependencies). Set your device name in `server.py
 ```python
 DEFAULT_CHROMECAST = "Living Room TV"
 ```
+
+## Docker
+
+Run Voice-to-Image in containers with GPU support. Includes Ollama sidecar.
+
+### Quick Start (docker compose)
+```bash
+# Requires nvidia-container-toolkit on host
+docker compose up -d
+# Access Web UI at http://localhost:8766
+# API at http://localhost:8765
+```
+
+First run downloads models:
+- Whisper base: ~150MB
+- SD-Turbo: ~3GB
+- llama3.2: ~2GB
+
+### Manual Docker
+```bash
+# Build image
+docker build -t voice-to-image .
+
+# Run Ollama separately
+docker run -d --gpus all -v ollama:/root/.ollama -p 11434:11434 ollama/ollama
+docker exec -it <container> ollama pull llama3.2
+
+# Run Voice-to-Image
+docker run --gpus all -p 8765:8765 -p 8766:8766 \
+  -e OLLAMA_HOST=http://host.docker.internal:11434 \
+  -v v2i-cache:/app/.cache \
+  voice-to-image
+```
+
+### Kubernetes
+```bash
+kubectl apply -f k8s-deployment.yaml
+```
+
+Includes:
+- Ollama deployment with PVC for models
+- Voice-to-Image deployment with GPU request
+- Services for API (8765) and WebUI (80)
 
 ---
 
